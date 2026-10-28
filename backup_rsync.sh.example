@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# Backup de buckets de RustFS a otro servidor (local / LAN) usando rsync sobre SSH.
+# Ver BACKUPS.md para la configuración.
+
+#========== CONFIG ==========
+# Buckets a respaldar (separados por espacio)
+BUCKETS="mi-bucket otro-bucket"
+
+# Servidor de destino
+SSH_DEST_HOST=192.168.0.1
+SSH_DEST_PORT=22
+SSH_DEST_USER=backup_user
+SSH_DEST_PATH=/home/backup_user/backups/rustfs
+
+# Servicio con el cliente S3 definido en compose.yaml
+SERVICE_NAME=backup
+#======== END CONFIG ========
+
+set -o pipefail
+export PATH=/usr/local/bin:/usr/bin:/bin:${PATH}
+
+SCRIPT_PATH=$(realpath "$0")
+WORKDIR=$(dirname "${SCRIPT_PATH}")
+LOG_FILE=${WORKDIR}/backup.log
+LOCAL_DIR=${WORKDIR}/backups
+FECHA=$(date +%Y%m%d-%H%M)
+
+log() {
+    echo "[$(date)] $*" >>"${LOG_FILE}"
+}
+
+fail() {
+    log "STATUS: ERROR - $*"
+    log "STATUS: BACKUP INCOMPLETO"
+    log "------------------------------------"
+    exit 1
+}
+
+cd "${WORKDIR}" || exit 1
+mkdir -p "${LOCAL_DIR}"
+log "========== Comenzando script Backup (rsync) - RUSTFS =========="
+
+ERRORES=0
+for BUCKET in ${BUCKETS}; do
+    DIR_NAME=${BUCKET}-${FECHA}
+    DIR=${LOCAL_DIR}/${DIR_NAME}
+    FILE=${DIR}.tar.gz
+
+    log ">> Descargando el bucket ${BUCKET} a ${DIR}"
+    mkdir -p "${DIR}"
+    if ! docker compose --progress quiet run --rm -T "${SERVICE_NAME}" \
+        s3 sync "s3://${BUCKET}" "/backups/${DIR_NAME}" --only-show-errors \
+        >>"${LOG_FILE}" 2>&1; then
+        log "STATUS: ERROR al descargar ${BUCKET}"
+        rm -rf "${DIR}"
+        ERRORES=$((ERRORES + 1))
+        continue
+    fi
+    log "STATUS: OK"
+
+    log ">> Comprimiendo ${DIR} en ${FILE}"
+    tar -czf "${FILE}" -C "${DIR}" . 2>>"${LOG_FILE}"
+    STATUS=$?
+    rm -rf "${DIR}"
+    if [ ${STATUS} -ne 0 ]; then
+        log "STATUS: ERROR al comprimir ${BUCKET}"
+        rm -f "${FILE}"
+        ERRORES=$((ERRORES + 1))
+        continue
+    fi
+    log "STATUS: OK"
+done
+
+# Si no se generó ningún archivo no hay nada para copiar
+ls "${LOCAL_DIR}"/*-"${FECHA}".tar.gz >/dev/null 2>&1 || fail "no se generó ningún backup"
+
+log ">> Copiando backups a ${SSH_DEST_USER}@${SSH_DEST_HOST}:${SSH_DEST_PATH} (puerto ${SSH_DEST_PORT})"
+rsync -az -e "ssh -p ${SSH_DEST_PORT} -o BatchMode=yes" \
+    "${LOCAL_DIR}"/*-"${FECHA}".tar.gz \
+    "${SSH_DEST_USER}@${SSH_DEST_HOST}:${SSH_DEST_PATH}/" 2>>"${LOG_FILE}" \
+    || fail "rsync falló, los backups quedan en ${LOCAL_DIR}"
+log "STATUS: OK"
+
+log ">> Eliminando copias locales ${LOCAL_DIR}/*-${FECHA}.tar.gz"
+rm -f "${LOCAL_DIR}"/*-"${FECHA}".tar.gz && log "STATUS: OK" || log "STATUS: ERROR"
+
+if [ ${ERRORES} -ne 0 ]; then
+    fail "${ERRORES} bucket(s) no se pudieron respaldar"
+fi
+log "STATUS: BACKUP FINALIZADO CORRECTAMENTE"
+log "------------------------------------"
+exit 0

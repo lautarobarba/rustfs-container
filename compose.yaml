@@ -41,3 +41,18 @@ services:
       interval: 30s
       retries: 3
       timeout: 10s
+
+  # Cliente S3 (aws-cli) usado por los scripts de backup y para restaurar.
+  # No se inicia con "docker compose up", se usa con "docker compose run --rm backup ..."
+  backup:
+    image: amazon/aws-cli:latest
+    profiles:
+      - backup
+    environment:
+      AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://rustfs:9000
+    volumes:
+      - ./backups:/backups
+      - ./restore:/restore

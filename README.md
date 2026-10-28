@@ -94,3 +94,35 @@ mc ls rustfs/mi-bucket
 ```bash
 docker compose down
 ```
+
+## Backups
+
+Los backups se hacen **por bucket**: se descarga el contenido completo del bucket y se comprime en un `.tar.gz`. Los archivos se guardan en **/backups**.
+
+Para backups automáticos (a otro servidor con rsync o a AWS S3 Glacier Deep Archive), cómo descargarlos y cómo restaurarlos en una instancia nueva, ver **[BACKUPS.md](BACKUPS.md)**.
+
+### Cliente S3 (servicio `backup`)
+
+_compose.yaml_ incluye el servicio `backup` con `aws-cli`, ya configurado con las credenciales del _.env_ y conectado a RustFS. No se inicia con `docker compose up`; se usa con `docker compose run`:
+
+```bash
+# Listar buckets
+docker compose run --rm backup s3 ls
+
+# Listar objetos de un bucket
+docker compose run --rm backup s3 ls s3://mi-bucket --recursive
+```
+
+### Backup manual
+
+Reemplazar `mi-bucket` por el bucket a respaldar (con `sudo`, porque los archivos descargados quedan con dueño root):
+
+```bash
+docker compose run --rm backup s3 sync s3://mi-bucket /backups/mi-bucket --only-show-errors
+sudo tar -czf mi-bucket-$(date +%Y%m%d-%H%M).tar.gz -C backups/mi-bucket .
+sudo rm -rf backups/mi-bucket
+```
+
+### Restaurar backup
+
+Ver [Restaurar en una instancia nueva](BACKUPS.md#restaurar-en-una-instancia-nueva).

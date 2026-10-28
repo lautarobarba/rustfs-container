@@ -3,3 +3,12 @@
 
 # Volumenes de docker
 data
+backups
+restore
+
+# Logs
+backup.log
+
+# Script Backup
+backup_rsync.sh
+backup_glacier.sh
