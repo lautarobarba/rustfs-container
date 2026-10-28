@@ -1,0 +1,5 @@
+# Variables de entorno
+.env
+
+# Volumenes de docker
+data
